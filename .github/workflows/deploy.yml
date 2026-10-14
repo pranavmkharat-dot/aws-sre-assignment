@@ -32,3 +32,19 @@ jobs:
         run: |
           cd aws-sre-hands-on
           python -m pytest app/
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t aws-sre-assignment:${{ github.sha }} \
+            aws-sre-hands-on
+
+      - name: Verify Docker image
+        run: docker image inspect aws-sre-assignment:${{ github.sha }}
