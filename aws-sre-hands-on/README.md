@@ -1,100 +1,174 @@
 # AWS DevOps / SRE Hands-On Project
 
-This repository is a practical starter for three tasks:
-1. GitHub Actions → tests → Docker → Amazon ECR → Kubernetes (EKS)
-2. CloudFront in front of a private S3 bucket using Origin Access Control (OAC)
-3. Launch Template + Auto Scaling Group + ALB + target tracking at 70% CPU
+This repository demonstrates practical AWS infrastructure, CI validation, container packaging, static-site delivery, and instance self-healing. It covers three assignment areas:
 
-> This is a project scaffold, not a claim that resources have already been deployed. Run and verify it in your own AWS account. AWS resources may incur charges.
+1. GitHub Actions CI for Python tests and Docker image build, with Amazon ECR publishing and Kubernetes deployment as the remaining end-to-end CI/CD work.
+2. A private Amazon S3 origin served through CloudFront using Origin Access Control (OAC).
+3. Terraform-managed Launch Template, Auto Scaling Group (ASG), Application Load Balancer (ALB), target group, health checks, and CPU target tracking at 70%.
 
-## Repository structure
+> **Current status:** The project is partially complete. The infrastructure components described below have been deployed and validated in the assignment AWS account. Automated GitHub Actions-to-ECR publishing and Kubernetes deployment are not yet complete. AWS resources can incur charges.
 
-- `app/`: Flask demo app and tests
-- `Dockerfile`: container build
-- `.github/workflows/deploy.yml`: CI/CD workflow using GitHub OIDC
-- `k8s/deployment.yaml`: Kubernetes Deployment and Service
-- `terraform/cloudfront/`: private S3 + CloudFront distribution
-- `terraform/asg/`: ALB + launch template + ASG + CPU target tracking
-- `docs/validation-checklist.md`: evidence checklist
+## Repository layout
 
-## Before you start
+From the GitHub repository root:
 
-Required locally: Git, Docker, AWS CLI v2, kubectl, Terraform, and an AWS account with permission to create the required resources.
+```text
+.github/workflows/
+  deploy.yml                 # Python tests and Docker build
+  terraform-validate.yml     # Terraform validation workflow
+aws-sre-hands-on/
+  app/                       # Flask demo app and tests
+  Dockerfile                 # Container build definition
+  k8s/deployment.yaml        # Kubernetes Deployment and Service manifest
+  site/                      # Static website content
+  terraform/cloudfront/     # Private S3 + CloudFront configuration
+  terraform/asg/             # ALB + Launch Template + ASG configuration
+  docs/validation-checklist.md
+  requirements.txt
+```
 
-Choose one AWS region and use it consistently. The examples default to `ap-south-1`.
+## Implementation status
 
-### GitHub Actions OIDC
+### Implemented and validated
 
-1. Create an IAM OIDC provider for `token.actions.githubusercontent.com` in AWS (if not already present).
-2. Create an IAM role trusted only by your repository and `main` branch. Restrict `sub` to `repo:OWNER/REPO:ref:refs/heads/main`.
-3. Grant that role only the ECR push permissions it needs and permission to call `eks:DescribeCluster`.
-4. Grant the role's IAM principal permission to deploy to the target EKS cluster through EKS access entries / Kubernetes RBAC.
-5. In GitHub repository Settings → Secrets and variables → Actions, add secret `AWS_ROLE_ARN`.
-6. Set repository variables `AWS_REGION`, `ECR_REPOSITORY`, and `EKS_CLUSTER_NAME`.
+- **GitHub Actions:** The workflow has passed the Python test and Docker build jobs. It is currently a CI/build workflow; it does not yet push to ECR or deploy to Kubernetes.
+- **Amazon ECR:** Repository `aws-sre-assignment` exists in `ap-southeast-2` (Sydney). Image tag `build-1` was pushed manually and verified. Image-tag immutability and scan-on-push are enabled.
+- **S3 + CloudFront:** Static content is served through CloudFront. The CloudFront URL returned HTTP 200 during validation, while direct access to an S3 object returned HTTP 403. The bucket policy limits read access to the CloudFront distribution through OAC.
+- **ALB + ASG:** Terraform provisions an internet-facing ALB, target group, Launch Template, ASG, and CPU target-tracking policy at 70% average CPU utilization. An unhealthy-instance test confirmed that ASG launched a replacement instance that reached `InService` and became healthy in the target group.
+- **Terraform:** Infrastructure configurations are maintained as code under `terraform/cloudfront/` and `terraform/asg/`.
 
-Never commit AWS keys, kubeconfig files, Terraform state, or secrets.
+### Remaining work / known limitations
 
-## CI/CD setup
+1. Complete an approved GitHub Actions-to-AWS authentication method and automate the ECR image push.
+2. Create or obtain access to an approved EKS/Kubernetes environment if Kubernetes deployment is required by the evaluator, then deploy and validate the workload.
+3. Run end-to-end validation after the CI/CD integration is available and capture the remaining evidence.
+4. Correct the demo response's instance-ID display: the current user-data script needs to retrieve instance metadata in a way compatible with the environment's IMDSv2 requirement.
 
-1. Create an ECR repository named `sre-cicd-demo`.
-2. Create an EKS cluster and configure the deployment identity as described above.
-3. Create the Kubernetes deployment once, updating the placeholder image in `k8s/deployment.yaml` to an image in your ECR repository:
-   `kubectl apply -f k8s/deployment.yaml`
-4. Push this repository to GitHub's `main` branch.
-5. Check Actions tab. The pipeline tests the app, builds and pushes an image tagged with the commit SHA, then updates the Deployment.
-6. Confirm with:
-   `kubectl rollout status deployment/sre-demo`
-   `kubectl get pods,svc`
+The GitHub Actions OIDC setup is currently blocked because an AWS Organizations Service Control Policy explicitly denies the IAM OIDC provider operation. This cannot be resolved just by attaching `AdministratorAccess` in the member account. The next step is to obtain guidance/approval from the AWS Organizations management-account administrator and/or AWS Support, or use another approved authentication path. Do not attempt to bypass the organization policy.
 
-The GitHub workflow pins actions to major version tags for readability in this learning project. For production, review and pin actions to full commit SHAs.
+No EKS cluster currently exists in `ap-southeast-2` for this assignment, so Kubernetes deployment should not be represented as completed. Creating EKS may incur additional charges and should be approved before provisioning.
+
+## Prerequisites
+
+For local testing and infrastructure changes, install Git, Python 3.12, Docker, AWS CLI v2, Terraform, and (when deploying Kubernetes) `kubectl`. Use an AWS identity that has been explicitly authorized to manage the target resources.
+
+The deployed assignment environment uses **`ap-southeast-2` (Asia Pacific — Sydney)**. Keep the region consistent when inspecting these resources. If reproducing the project in another account or region, review the variables and Terraform plan first; do not assume existing resource names or identifiers will be available.
+
+Never commit AWS keys, access tokens, kubeconfig files, Terraform state, state backups, or other secrets.
+
+## Run the tests and build the container
+
+Run from the repository root:
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r aws-sre-hands-on/requirements.txt
+python -m pip install pytest
+python -m pytest aws-sre-hands-on/app/
+
+docker build -t aws-sre-assignment:local aws-sre-hands-on
+```
+
+The GitHub Actions workflow currently automates the test and image-build stages. The manual ECR image push described below is separate from that workflow.
+
+## Amazon ECR reference
+
+- **Region:** `ap-southeast-2`
+- **Repository:** `aws-sre-assignment`
+- **Repository URI:** `134129016924.dkr.ecr.ap-southeast-2.amazonaws.com/aws-sre-assignment`
+- **Manually pushed tag:** `build-1`
+- **Verified image digest:** `sha256:3084fbb4cb85bacb11ff76d48c62414a885dc35732cc6387430f9f594d133631`
+
+The repository uses immutable image tags and scan-on-push. The current `build-1` image was pushed manually; it was not published by the GitHub Actions workflow.
 
 ## CloudFront + private S3
 
-Use Terraform in `terraform/cloudfront`. The bucket is private and CloudFront uses OAC to read objects. Upload `index.html` and any assets after `terraform apply`.
+The Terraform configuration is in `aws-sre-hands-on/terraform/cloudfront/`. The current deployed references are:
+
+- **CloudFront URL:** https://d6wyav0pk3m6.cloudfront.net
+- **Distribution ID:** `EYCCN3Y8EQF34`
+- **S3 bucket:** `aws-sre-assignment-134129016924-ap-southeast-2`
+
+Validation performed: the CloudFront site returned HTTP 200, while direct S3 object access returned HTTP 403. The S3 bucket policy authorizes CloudFront access through OAC for the intended distribution.
+
+To review or apply the Terraform configuration in a dedicated environment, run from the repository root:
 
 ```bash
-cd terraform/cloudfront
+cd aws-sre-hands-on/terraform/cloudfront
 terraform init
-terraform plan -out=tfplan
-terraform apply tfplan
+terraform fmt -check
+terraform validate
+terraform plan
 ```
 
-For a quick test, upload a file:
-`aws s3 cp ../../site/index.html s3://$(terraform output -raw bucket_name)/index.html`
-
-Test the CloudFront URL from `terraform output -raw cloudfront_domain_name`. Direct S3 object access should be denied. After updating content, invalidate the changed path:
-
-`aws cloudfront create-invalidation --distribution-id "$(terraform output -raw distribution_id)" --paths "/index.html"`
-
-## ALB + ASG
-
-The Terraform example in `terraform/asg` uses the default VPC and its subnets to keep the lab concise. Review and adapt it before production use. It creates an internet-facing ALB, target group, Launch Template, Auto Scaling Group, and average CPU target tracking at 70%.
+Review the complete plan before applying changes. Terraform state is environment-specific and should not be committed. After website content changes, invalidate the relevant CloudFront path using the distribution ID for the environment you are updating:
 
 ```bash
-cd terraform/asg
-terraform init
-terraform plan -out=tfplan
-terraform apply tfplan
+aws cloudfront create-invalidation \
+  --distribution-id "<DISTRIBUTION_ID>" \
+  --paths "/index.html"
 ```
 
-The EC2 instances serve a simple Nginx page. Check the ALB URL from `terraform output -raw alb_dns_name`. In the EC2 console, inspect the ASG and target group health.
+## ALB + Auto Scaling Group
 
-To test replacement in a lab, stop Nginx on one instance using Session Manager or another approved access method. Wait for ALB health checks to fail and confirm the ASG replaces the instance. Do not do this on production workloads.
+The Terraform configuration is in `aws-sre-hands-on/terraform/asg/`. The current deployed references are:
 
-## Cleanup
+- **ALB DNS:** `sre-web-alb-529081989.ap-southeast-2.elb.amazonaws.com`
+- **Auto Scaling Group:** `sre-web-asg`
+- **Launch Template ID:** `lt-06239d8069c1e32b6`
+- **Capacity:** minimum 1, desired 1, maximum 2
+- **Instance type:** `t3.micro`
+- **CPU target-tracking target:** 70% average CPU utilization
 
-Run `terraform destroy` from each Terraform directory after you finish. Delete the EKS cluster and ECR images/repository separately if you created them separately. Confirm there are no leftover load balancers, NAT gateways, EC2 instances, CloudFront distributions, or S3 buckets.
+A failure test was performed by marking an instance unhealthy. The ASG launched a replacement and the replacement became healthy in the target group. Do not repeat failure tests on production workloads or shared environments without approval.
 
-## Submission evidence
+To review the configuration in a dedicated environment:
 
-Capture genuine screenshots of:
-- GitHub Actions workflow passing
-- ECR image tagged with the commit SHA
-- Kubernetes rollout and running pods
-- CloudFront website loading and direct S3 access denied
-- Invalidation status
-- ALB target group healthy instances
-- ASG scaling policy with target CPU 70%
-- ASG activity history showing an unhealthy instance replaced
+```bash
+cd aws-sre-hands-on/terraform/asg
+terraform init
+terraform fmt -check
+terraform validate
+terraform plan
+```
 
-Do not submit fabricated screenshots or claim unverified deployment results.
+Review the planned changes before applying them. The example uses a default VPC and its subnets for lab simplicity; adapt and security-review it before any production use.
+
+## Kubernetes deployment status
+
+The repository includes `aws-sre-hands-on/k8s/deployment.yaml`, but the Kubernetes deployment has **not** been validated in a live EKS cluster for this assignment. Before deployment:
+
+1. Obtain approval for an EKS cluster or the target Kubernetes environment and understand the expected costs.
+2. Configure an approved deployment identity and grant the necessary EKS access / Kubernetes RBAC permissions.
+3. Update the manifest to reference the correct ECR image URI and tag.
+4. Apply the manifest and verify the rollout and running pods.
+
+Only mark this section complete after the workload is actually deployed and validated.
+
+## Cleanup and cost awareness
+
+The assignment environment contains deployed AWS resources. **Do not run `terraform destroy` against the current/shared environment unless you are authorized to remove those resources.** Destroying CloudFront or related infrastructure can take the live demo offline.
+
+For a separate lab environment that you own, inspect Terraform state and the destroy plan in each Terraform directory before confirming cleanup. Delete separately created resources (such as ECR repositories/images or an EKS cluster) only after checking their dependencies. Afterwards, verify that no billable resources remain, including load balancers, EC2 instances, NAT gateways, CloudFront distributions, and S3 buckets.
+
+## Submission evidence checklist
+
+Capture genuine screenshots or command output for the items that are actually complete:
+
+- [x] GitHub Actions test and Docker build jobs passed
+- [x] ECR repository and manually pushed `build-1` image verified
+- [x] CloudFront website returned HTTP 200
+- [x] Direct S3 object access returned HTTP 403
+- [x] CloudFront invalidation created
+- [x] ALB target group returned to healthy status after ASG instance replacement
+- [x] ASG CPU target-tracking policy configured at 70%
+- [ ] GitHub Actions automatically authenticates to AWS and pushes an image to ECR
+- [ ] Kubernetes deployment / rollout and running pods validated in an approved cluster
+- [ ] Final end-to-end CI/CD validation completed
+
+Do not submit fabricated screenshots or claim unverified deployment results. The current completion estimate is approximately 85%; this is a project estimate, not an AWS-generated status.
+
+## Project links
+
+- **GitHub repository:** https://github.com/pranavmkharat-dot/aws-sre-assignment
+- **Live CloudFront demo:** https://d6wyav0pk3m6.cloudfront.net
