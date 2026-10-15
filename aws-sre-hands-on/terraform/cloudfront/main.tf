@@ -59,8 +59,6 @@ resource "aws_cloudfront_distribution" "site" {
   depends_on = [aws_s3_bucket_public_access_block.site]
 }
 
-data "aws_caller_identity" "current" {}
-
 resource "aws_s3_bucket_policy" "allow_cloudfront" {
   bucket = aws_s3_bucket.site.id
   policy = jsonencode({
